@@ -11,6 +11,7 @@ namespace T3Monitor\T3monitoring\Service\Import;
 
 use Exception;
 use T3Monitor\T3monitoring\Domain\Model\Extension;
+use T3Monitor\T3monitoring\Event\ImportClientDataEvent;
 use T3Monitor\T3monitoring\Notification\EmailNotification;
 use T3Monitor\T3monitoring\Service\DataIntegrity;
 use TYPO3\CMS\Core\Database\Connection;
@@ -125,6 +126,11 @@ class ClientImport extends BaseImport
                 'extensions' => $this->handleExtensionRelations($row['uid'], (array)$json['extensions']),
                 'error_count' => 0
             ];
+
+            $event = $this->eventDispatcher->dispatch(
+                new ImportClientDataEvent($json, $row, $update)
+            );
+            $update = $event->getUpdate();
 
             $this->addExtraData($json, $update, 'info');
             $this->addExtraData($json, $update, 'warning');
@@ -272,6 +278,10 @@ class ClientImport extends BaseImport
                 }
             }
 
+            $state = array_search($data['state'] ?? null, Extension::$defaultStates, true) ?: key(array_slice(Extension::$defaultStates, -1, 1, true));
+            $title = empty($data['title']) ? 'extension has no title' : $data['title'];
+            $category = empty($data['category']) ? false : $data['category'];
+
             if ($found) {
                 $relationId = $found['uid'];
             } else {
@@ -285,17 +295,17 @@ class ClientImport extends BaseImport
                     'version_integer' => VersionNumberUtility::convertVersionNumberToInteger($data['version']),
                     'major_version' => (int)$versionSplit[0],
                     'minor_version' => (int)$versionSplit[1],
-                    'title' => (string)$data['title'],
-                    'description' => (string)$data['description'],
-                    'author_name' => (string)$data['author'],
-                    'state' => array_search($data['state'], Extension::$defaultStates, true) ?: key(array_slice(Extension::$defaultStates, -1, 1, true)),
-                    'category' => (int)array_search($data['category'], Extension::$defaultCategories),
+                    'title' => $title,
+                    'description' => $data['description'] ?? '',
+                    'author_name' => $data['author'] ?? '',
+                    'state' => $state,
+                    'category' => (int)array_search($category, Extension::$defaultCategories),
                     'is_official' => 0,
                     'tstamp' => $GLOBALS['EXEC_TIME'],
                     'update_comment' => '',
                 ];
 
-                if ($data['constraints'] !== null) {
+                if ($data['constraints'] ?? null) {
                     $insert['serialized_dependencies'] = $this->serializeDependencies($data['constraints']);
                 }
 
@@ -307,8 +317,8 @@ class ClientImport extends BaseImport
             $relationsToBeAdded[] = [
                 $client,
                 $relationId,
-                ($data['title']) ?: 'extension has no title',
-                array_search($data['state'], Extension::$defaultStates, true) ?: key(array_slice(Extension::$defaultStates, -1, 1, true)),
+                $title,
+                $state,
                 $data['isLoaded'],
             ];
 
